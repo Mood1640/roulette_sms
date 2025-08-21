@@ -169,4 +169,173 @@
 
     // highlight chamber at marker
     const slice = (Math.PI*2)/n;
-    const chamberR = R*0.18*
+    const chamberR = R*0.18;
+    const ringR = R*0.62;
+    const hitIdx = nameIndexAtMarker(arr);
+    if(hitIdx !== null){
+      const a = startAngle + hitIdx*slice + slice/2;
+      const hx = cx + ringR*Math.cos(a);
+      const hy = cy + ringR*Math.sin(a);
+      ctx.beginPath(); ctx.arc(hx, hy, chamberR+9, 0, Math.PI*2);
+      ctx.fillStyle = "rgba(255,255,255,0.08)"; ctx.fill();
+    }
+
+    // chambers
+    for(let i=0;i<n;i++){
+      const label = arr[i];
+      const type = classOf(label);
+      const a = startAngle + i*slice + slice/2;
+      const x = cx + ringR*Math.cos(a);
+      const y = cy + ringR*Math.sin(a);
+
+      // bore
+      const bore = ctx.createRadialGradient(x, y, 2, x, y, chamberR);
+      bore.addColorStop(0, "#0b0f16");
+      bore.addColorStop(0.6, "#0f1422");
+      bore.addColorStop(1, "#0a0f18");
+      ctx.beginPath(); ctx.arc(x, y, chamberR, 0, Math.PI*2); ctx.fillStyle = bore; ctx.fill();
+
+      // rim
+      ctx.lineWidth = 2; ctx.strokeStyle = "rgba(255,255,255,0.10)";
+      ctx.beginPath(); ctx.arc(x, y, chamberR-3, 0, Math.PI*2); ctx.stroke();
+
+      // if "shot" chamber, draw brass round inside
+      if(type === "shot"){
+        const shell = ctx.createRadialGradient(x, y, 2, x, y, chamberR*0.72);
+        shell.addColorStop(0, "#f2d99a");
+        shell.addColorStop(0.5, "#c9a866");
+        shell.addColorStop(1, "#a4854d");
+        ctx.beginPath(); ctx.arc(x, y, chamberR*0.72, 0, Math.PI*2); ctx.fillStyle = shell; ctx.fill();
+        // primer dot
+        ctx.beginPath(); ctx.arc(x, y, chamberR*0.14, 0, Math.PI*2); ctx.fillStyle = "#5d4b2a"; ctx.fill();
+      }
+
+      // tiny highlight
+      ctx.beginPath(); ctx.arc(x - chamberR*0.35, y - chamberR*0.35, 3.3, 0, Math.PI*2);
+      ctx.fillStyle = "rgba(255,255,255,0.25)"; ctx.fill();
+
+      // label
+      ctx.fillStyle = "#e7edf5";
+      ctx.font = "13px system-ui";
+      ctx.textAlign = "center"; ctx.textBaseline = "top";
+      ctx.fillText(label, x, y + chamberR + 6);
+    }
+
+    // extractor star (center)
+    const starR = R*0.22, teeth=6;
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(startAngle*0.15); // subtle offset to look mechanical
+    ctx.fillStyle = "#202838"; ctx.strokeStyle="rgba(0,0,0,0.55)"; ctx.lineWidth=3;
+    ctx.beginPath();
+    for(let i=0;i<teeth;i++){
+      const a0 = (i/teeth)*Math.PI*2;
+      const a1 = a0 + Math.PI/teeth;
+      const r1 = starR*0.55, r2 = starR;
+      ctx.lineTo(Math.cos(a0)*r1, Math.sin(a0)*r1);
+      ctx.lineTo(Math.cos(a1)*r2, Math.sin(a1)*r2);
+    }
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.restore();
+
+    // center cap
+    ctx.beginPath(); ctx.arc(cx, cy, starR*0.55, 0, Math.PI*2);
+    const cap = ctx.createRadialGradient(cx, cy, 2, cx, cy, starR*0.55);
+    cap.addColorStop(0, "#3a4456"); cap.addColorStop(1, "#1d2536");
+    ctx.fillStyle = cap; ctx.fill();
+    ctx.lineWidth = 2; ctx.strokeStyle = "rgba(255,255,255,0.08)"; ctx.stroke();
+
+    // screws (at 0° and 180°)
+    const screwR = R*0.07;
+    [[cx+R*0.7, cy],[cx-R*0.7, cy]].forEach(([sx,sy])=>{
+      ctx.beginPath(); ctx.arc(sx,sy,screwR,0,Math.PI*2);
+      const sg = ctx.createRadialGradient(sx, sy, 2, sx, sy, screwR);
+      sg.addColorStop(0,"#5a6474"); sg.addColorStop(1,"#2a3344");
+      ctx.fillStyle = sg; ctx.fill();
+      ctx.lineWidth=2; ctx.strokeStyle="rgba(0,0,0,0.6)"; ctx.stroke();
+      // cross slot
+      ctx.lineWidth=2; ctx.strokeStyle="rgba(255,255,255,0.35)";
+      ctx.beginPath(); ctx.moveTo(sx-screwR*0.7, sy); ctx.lineTo(sx+screwR*0.7, sy); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(sx, sy-screwR*0.7); ctx.lineTo(sx, sy+screwR*0.7); ctx.stroke();
+    });
+  }
+
+  // spin
+  let spinning = false;
+  function fairRandomAngle(){
+    const arr = normalizedNames();
+    const n = arr.length;
+    const slice = (Math.PI*2)/n;
+    const targetIndex = Math.floor(Math.random()*n);
+    const offset = (Math.random()-0.5)*slice*0.9;
+    const targetAngle = startAngle + targetIndex*slice + slice/2 + offset;
+    const final = -Math.PI/2 - (targetAngle - startAngle);
+    const extra = Math.PI*2*(4 + Math.floor(Math.random()*2)); // 4-5 spins
+    return startAngle + final + extra;
+  }
+
+  function spin(){
+    if(spinning || normalizedNames().length===0) return;
+    spinning = true; status.textContent = "Spinning…";
+    const begin = performance.now(), from = startAngle, to = fairRandomAngle();
+    const duration = 3800 + Math.random()*800;
+
+    (function anim(t0){
+      const t = (t0 - begin) / duration;
+      const e = t<0 ? 0 : t>1 ? 1 : t;
+      const k = 1 - Math.pow(1-e, 3); // easeOutCubic
+      startAngle = from + (to - from)*k;
+      draw();
+      if(e < 1){ requestAnimationFrame(anim); }
+      else{
+        spinning = false;
+        const arr = normalizedNames();
+        const hit = currentNameAtMarker(arr);
+        const typ = classOf(hit);
+        status.innerHTML = (typ==="safe"||typ==="none")
+          ? `😅 <b>${hit}</b> — safe.`
+          : (typ==="lucky" ? `🍀 <b>${hit}</b> — lucky!` : `☠️ <b>${hit}</b> — take a shot!`);
+
+        if(soundToggle.checked){
+          let audio = snd.gun;
+          if(typ==="safe")  audio = snd.safe;
+          else if(typ==="none") audio = snd.click;
+          else if(typ==="lucky" && snd.lucky?.src) audio = snd.lucky;
+          audio.currentTime = 0;
+          audio.play().catch(()=>{});
+        }
+        if(removeOnHit.checked){
+          const arr0 = [...names]; // remove matching one instance
+          const idx = arr0.findIndex(n => n === hit);
+          if(idx >= 0) arr0.splice(idx,1);
+          names = arr0;
+          namesInput.value = names.join(", ");
+          localStorage.setItem(LS_KEY, JSON.stringify(names));
+          setTimeout(()=>draw(), 400);
+        }
+      }
+    })(performance.now());
+  }
+
+  function nameIndexAtMarker(arr){
+    if(!arr || arr.length===0) return null;
+    const slice = (Math.PI*2)/arr.length;
+    const relative = ((-Math.PI/2) - startAngle) % (Math.PI*2);
+    const norm = (relative + Math.PI*2) % (Math.PI*2);
+    return Math.floor(norm / slice);
+  }
+  function currentNameAtMarker(arr){ const idx = nameIndexAtMarker(arr); return idx===null ? "" : normalizedNames()[idx]; }
+
+  // wires
+  $("#spin").addEventListener("click", spin);
+  $("#saveNames").addEventListener("click", saveNames);
+  $("#shuffle").addEventListener("click", ()=>{ names = shuffle(names); namesInput.value = names.join(", "); localStorage.setItem(LS_KEY, JSON.stringify(names)); draw(); });
+  $("#nuke").addEventListener("click", ()=> status.textContent="Ready.");
+  sixLock.addEventListener("change", draw);
+
+  // init
+  fitDPI(); loadNames(); draw();
+})();
+</script>
+</body>
+</html>
