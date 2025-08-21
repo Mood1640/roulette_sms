@@ -20,7 +20,7 @@ app.post("/send", async (req, res) => {
       client.messages.create({
         from: TWILIO_FROM,
         to: num,
-        body: `Kyle: Party Roulette link → ${host}\nReply STOP to opt out.`
+        body: `RUSSIAN Roulette link here → ${host}\nReply STOP to opt out.`
       })
     );
     await Promise.all(tasks);
