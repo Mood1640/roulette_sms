@@ -60,8 +60,6 @@
 <!-- sounds -->
 <audio id="sndGun"   preload="auto" src="gunshot.mp3"></audio>
 <audio id="sndSafe"  preload="auto" src="safe.mp3"></audio>
-<audio id="sndClick" preload="auto" src="click.mp3"></audio>
-<audio id="sndLucky" preload="auto" src="lucky.mp3"></audio> <!-- optional -->
 
 <script>
 (function(){
@@ -73,12 +71,11 @@
   const removeOnHit = $("#remove");
   const sixLock = $("#sixlock");
 
-  const snd = {
-    gun:   $("#sndGun"),
-    safe:  $("#sndSafe"),
-    click: $("#sndClick"),
-    lucky: $("#sndLucky"),
-  };
+const snd = {
+  gun:   $("#sndGun"),
+  safe:  $("#sndSafe"),
+  lucky: $("#sndLucky"),
+};
 
   // DPI crispness
   function fitDPI(){
@@ -262,60 +259,91 @@
 
   // spin
   let spinning = false;
-  function fairRandomAngle(){
-    const arr = normalizedNames();
-    const n = arr.length;
-    const slice = (Math.PI*2)/n;
-    const targetIndex = Math.floor(Math.random()*n);
-    const offset = (Math.random()-0.5)*slice*0.9;
-    const targetAngle = startAngle + targetIndex*slice + slice/2 + offset;
-    const final = -Math.PI/2 - (targetAngle - startAngle);
-    const extra = Math.PI*2*(4 + Math.floor(Math.random()*2)); // 4-5 spins
-    return startAngle + final + extra;
-  }
+  // === NEW: compute a snap target that centers a random chamber under the marker ===
+function computeSnapTarget() {
+  const arr = normalizedNames();
+  const n = arr.length;
+  const slice = (Math.PI * 2) / n;
 
-  function spin(){
-    if(spinning || normalizedNames().length===0) return;
-    spinning = true; status.textContent = "Spinning…";
-    const begin = performance.now(), from = startAngle, to = fairRandomAngle();
-    const duration = 3800 + Math.random()*800;
+  // pick a random chamber index to end on
+  const targetIndex = Math.floor(Math.random() * n);
 
-    (function anim(t0){
-      const t = (t0 - begin) / duration;
-      const e = t<0 ? 0 : t>1 ? 1 : t;
-      const k = 1 - Math.pow(1-e, 3); // easeOutCubic
-      startAngle = from + (to - from)*k;
+  // baseFinal: orientation where that chamber's CENTER is exactly at the top marker (-PI/2)
+  const baseFinal = -Math.PI / 2 - (targetIndex * slice + slice / 2);
+
+  // make sure we move forward from the current angle + add 4–5 extra full rotations
+  const fullTurn = Math.PI * 2;
+  let to = baseFinal;
+
+  // ensure final angle is ahead of current startAngle
+  while (to <= startAngle) to += fullTurn;
+
+  // add extra drama spins
+  to += fullTurn * (4 + Math.floor(Math.random() * 2)); // 4–5 spins
+
+  return { to, targetIndex };
+}
+
+function spin() {
+  const arr = normalizedNames();
+  if (spinning || arr.length === 0) return;
+
+  spinning = true;
+  status.textContent = "Spinning…";
+
+  const { to, targetIndex } = computeSnapTarget();
+  const begin = performance.now();
+  const from = startAngle;
+  const duration = 3800 + Math.random() * 800;
+
+  (function anim(t0) {
+    const t = (t0 - begin) / duration;
+    const e = t < 0 ? 0 : t > 1 ? 1 : t;
+    const k = 1 - Math.pow(1 - e, 3); // easeOutCubic
+
+    startAngle = from + (to - from) * k;
+    draw();
+
+    if (e < 1) {
+      requestAnimationFrame(anim);
+    } else {
+      // snap exactly to target (no drift)
+      startAngle = to;
       draw();
-      if(e < 1){ requestAnimationFrame(anim); }
-      else{
-        spinning = false;
-        const arr = normalizedNames();
-        const hit = currentNameAtMarker(arr);
-        const typ = classOf(hit);
-        status.innerHTML = (typ==="safe"||typ==="none")
-          ? `😅 <b>${hit}</b> — safe.`
-          : (typ==="lucky" ? `🍀 <b>${hit}</b> — lucky!` : `☠️ <b>${hit}</b> — take a shot!`);
 
-        if(soundToggle.checked){
-          let audio = snd.gun;
-          if(typ==="safe")  audio = snd.safe;
-          else if(typ==="none") audio = snd.click;
-          else if(typ==="lucky" && snd.lucky?.src) audio = snd.lucky;
-          audio.currentTime = 0;
-          audio.play().catch(()=>{});
-        }
-        if(removeOnHit.checked){
-          const arr0 = [...names]; // remove matching one instance
-          const idx = arr0.findIndex(n => n === hit);
-          if(idx >= 0) arr0.splice(idx,1);
-          names = arr0;
-          namesInput.value = names.join(", ");
-          localStorage.setItem(LS_KEY, JSON.stringify(names));
-          setTimeout(()=>draw(), 400);
-        }
+      const hit = arr[targetIndex];
+      const typ = classOf(hit);
+
+      status.innerHTML =
+        (typ === "safe" || typ === "none")
+          ? `😅 <b>${hit}</b> — safe.`
+          : (typ === "lucky"
+              ? `🍀 <b>${hit}</b> — lucky!`
+              : `☠️ <b>${hit}</b> — take a shot!`);
+
+// replace the whole "if (soundToggle.checked) { ... }" block with:
+if (soundToggle.checked) {
+  let audio = null;
+  if (typ === "safe") audio = snd.safe;           // Safe → safe.mp3
+  else if (typ === "lucky" && snd.lucky?.src) audio = snd.lucky; // Lucky → lucky.mp3 if present
+  else if (typ === "shot") audio = snd.gun;       // Names → gunshot.mp3
+  if (audio) { audio.currentTime = 0; audio.play().catch(() => {}); }
+}
+
+      if (removeOnHit.checked) {
+        const arr0 = [...names];
+        const idx = arr0.findIndex(n => n === hit);
+        if (idx >= 0) arr0.splice(idx, 1);
+        names = arr0;
+        namesInput.value = names.join(", ");
+        localStorage.setItem(LS_KEY, JSON.stringify(names));
+        setTimeout(() => draw(), 300);
       }
-    })(performance.now());
-  }
+
+      spinning = false;
+    }
+  })(performance.now());
+}
 
   function nameIndexAtMarker(arr){
     if(!arr || arr.length===0) return null;
