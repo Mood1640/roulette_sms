@@ -7,21 +7,22 @@
 <style>
   :root { --bg:#0b0f17; --card:#131a29; --text:#e7edf5; --muted:#9fb0c7; }
   *{box-sizing:border-box;font-family:ui-sans-serif,system-ui,Segoe UI,Roboto,Inter,Arial}
-  body{margin:0;background:linear-gradient(180deg,#0b0f17,#0b0f17 50%,#0f1625);color:var(--text);display:flex;min-height:100svh}
+  body{margin:0;background:radial-gradient(1200px 600px at 50% -200px,#121a2b,#0b0f17 60%);color:var(--text);display:flex;min-height:100svh}
   .wrap{margin:auto;display:grid;gap:16px;max-width:720px;padding:20px}
-  .card{background:var(--card);border-radius:18px;box-shadow:0 10px 24px rgba(0,0,0,.3);padding:16px}
+  .card{background:var(--card);border-radius:18px;box-shadow:0 10px 24px rgba(0,0,0,.35);padding:16px}
   h1{margin:0 0 8px;font-size:24px}
-  .row{display:flex;gap:8px;flex-wrap:wrap}
-  input,button,textarea,select{background:#0e1524;color:var(--text);border:1px solid #202a3f;border-radius:12px;padding:10px 12px}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  input,button,label{background:#0e1524;color:var(--text);border:1px solid #202a3f;border-radius:12px;padding:10px 12px}
+  input{flex:1;min-width:220px}
   button{cursor:pointer;border:none;background:#1c2742}
   button:active{transform:translateY(1px)}
   .wheel-wrap{position:relative;display:grid;place-items:center}
-  canvas{width:min(92vw,480px);height:min(92vw,480px)}
-  .marker{position:absolute;top:8px;width:0;height:0;border-left:14px solid transparent;border-right:14px solid transparent;border-top:18px solid #d9e2f1;filter:drop-shadow(0 2px 0 rgba(0,0,0,.5))}
+  canvas{width:min(92vw,540px);height:min(92vw,540px)}
+  .marker{position:absolute;top:8px;width:0;height:0;border-left:14px solid transparent;border-right:14px solid transparent;border-top:18px solid #e8eefb;filter:drop-shadow(0 2px 0 rgba(0,0,0,.5))}
   .result{font-size:18px;color:var(--muted)}
   .badge{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border:1px solid #253252;border-radius:999px;font-size:13px;color:var(--muted)}
-  .list{width:100%}
   .muted{color:var(--muted)}
+  code{background:#0e1524;padding:2px 6px;border-radius:6px;border:1px solid #202a3f}
 </style>
 </head>
 <body>
@@ -29,11 +30,12 @@
   <div class="card">
     <h1>Party Roulette 🎯</h1>
     <div class="row">
-      <input id="names" class="list" placeholder="Comma-separated names (e.g., Alex, Bea, Chris)" />
+      <input id="names" placeholder="Comma-separated (e.g., Kyle, Safe, Julian, Lucky_Spot)" />
       <button id="saveNames">Save</button>
       <button id="shuffle">Shuffle</button>
       <label class="badge"><input type="checkbox" id="sound" style="accent-color:#8fb3ff;margin:0" checked /> sound</label>
       <label class="badge"><input type="checkbox" id="remove" style="accent-color:#8fb3ff;margin:0" /> remove on hit</label>
+      <label class="badge"><input type="checkbox" id="sixlock" style="accent-color:#8fb3ff;margin:0" checked /> 6-chamber lock</label>
     </div>
     <div class="muted" style="margin-top:6px">
       Tip: share this link; the page reads <code>?names=Alex,Bea,Chris</code> automatically.
@@ -42,7 +44,7 @@
 
   <div class="card wheel-wrap">
     <div class="marker"></div>
-    <canvas id="wheel" width="500" height="500"></canvas>
+    <canvas id="wheel" width="600" height="600"></canvas>
     <div class="row" style="margin-top:12px">
       <button id="spin">Spin</button>
       <button id="nuke">Clear Winner</button>
@@ -55,7 +57,11 @@
   </div>
 </div>
 
-<audio id="bang" preload="auto" src="gunshot.mp3"></audio>
+<!-- sounds -->
+<audio id="sndGun"   preload="auto" src="gunshot.mp3"></audio>
+<audio id="sndSafe"  preload="auto" src="safe.mp3"></audio>
+<audio id="sndClick" preload="auto" src="click.mp3"></audio>
+<audio id="sndLucky" preload="auto" src="lucky.mp3"></audio> <!-- optional -->
 
 <script>
 (function(){
@@ -65,179 +71,102 @@
   const status = $("#status");
   const soundToggle = $("#sound");
   const removeOnHit = $("#remove");
-  const bang = $("#bang");
+  const sixLock = $("#sixlock");
 
-  // Load names from URL or localStorage
+  const snd = {
+    gun:   $("#sndGun"),
+    safe:  $("#sndSafe"),
+    click: $("#sndClick"),
+    lucky: $("#sndLucky"),
+  };
+
+  // DPI crispness
+  function fitDPI(){
+    const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+    const cssW = wheel.clientWidth, cssH = wheel.clientHeight;
+    wheel.width = Math.round(cssW * dpr);
+    wheel.height = Math.round(cssH * dpr);
+    ctx.setTransform(dpr,0,0,dpr,0,0); // draw in CSS pixels
+  }
+  window.addEventListener('resize', ()=>{ fitDPI(); draw(); });
+
+  // names
   const params = new URLSearchParams(location.search);
   const urlNames = params.get("names");
-  const LS_KEY = "party_roulette_names_v1";
+  const LS_KEY = "party_roulette_names_v3";
   let names = [];
 
-  function parseNames(str){
-    return (str||"")
-      .split(",")
-      .map(s=>s.trim())
-      .filter(Boolean);
-  }
-
+  function parseNames(str){ return (str||"").split(",").map(s=>s.trim()).filter(Boolean); }
   function loadNames(){
-    if(urlNames){
-      names = parseNames(urlNames);
-      localStorage.setItem(LS_KEY, JSON.stringify(names));
-    } else {
+    if(urlNames){ names = parseNames(urlNames); localStorage.setItem(LS_KEY, JSON.stringify(names)); }
+    else{
       const saved = localStorage.getItem(LS_KEY);
-      names = saved ? JSON.parse(saved) : ["Alice","Bob","Charlie","Dana"];
+      names = saved ? JSON.parse(saved) : ["Julian","Safe","Kyle","Lucky_Spot","None","Safe"];
     }
     namesInput.value = names.join(", ");
   }
-
   function saveNames(){
     names = parseNames(namesInput.value);
     localStorage.setItem(LS_KEY, JSON.stringify(names));
     draw();
     status.textContent = `Saved ${names.length} names.`;
   }
+  function shuffle(arr){ for(let i=arr.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [arr[i],arr[j]]=[arr[j],arr[i]]; } return arr; }
 
-  function shuffle(arr){
-    for(let i=arr.length-1;i>0;i--){
-      const j = Math.floor(Math.random()*(i+1));
-      [arr[i],arr[j]]=[arr[j],arr[i]];
+  // 6-chamber normalization
+  function normalizedNames(){
+    let arr = [...names];
+    if(sixLock.checked){
+      if(arr.length < 6){
+        while(arr.length < 6) arr.push("Safe");
+      } else if(arr.length > 6){
+        arr = arr.slice(0,6);
+      }
     }
     return arr;
   }
 
-  // Draw the wheel
-  let startAngle = -Math.PI/2; // so the marker points to top
-  function draw(){
-    const n = names.length;
-    const W = wheel.width, H = wheel.height;
-    const cx = W/2, cy = H/2, r = Math.min(W,H)/2 - 12;
+  // visual + logic helpers
+  let startAngle = -Math.PI/2; // marker at top
 
+  function keyOf(label){
+    return (label||"").toLowerCase().replace(/[_-]/g," ").replace(/\s+/g," ").trim();
+  }
+  function classOf(label){
+    const k = keyOf(label);
+    if(k === "safe") return "safe";
+    if(k === "none" || k === "no shot" || k === "no-shot" || k === "noshot") return "none";
+    if(k.startsWith("lucky")) return "lucky";
+    return "shot";
+  }
+
+  function draw(){
+    const arr = normalizedNames();
+    const n = arr.length;
+    const W = wheel.clientWidth, H = wheel.clientHeight;
+    const cx = W/2, cy = H/2;
+    const R = Math.min(W,H)/2 - 10;
     ctx.clearRect(0,0,W,H);
 
     if(n===0){
-      ctx.fillStyle="#9fb0c7";
-      ctx.textAlign="center"; ctx.textBaseline="middle";
-      ctx.font="18px system-ui";
-      ctx.fillText("Add names to play", cx, cy);
-      return;
+      ctx.fillStyle="#9fb0c7"; ctx.textAlign="center"; ctx.textBaseline="middle"; ctx.font="18px system-ui";
+      ctx.fillText("Add names to play", cx, cy); return;
     }
 
-    // draw slices
+    // --- BACK PLATE (steel)
+    const base = ctx.createRadialGradient(cx, cy, R*0.15, cx, cy, R);
+    base.addColorStop(0, "#596374");
+    base.addColorStop(0.45, "#435064");
+    base.addColorStop(1, "#2a3344");
+    ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI*2); ctx.fillStyle = base; ctx.fill();
+
+    // bevel rim
+    ctx.lineWidth = 10;
+    ctx.strokeStyle = "rgba(255,255,255,0.09)";
+    ctx.beginPath(); ctx.arc(cx, cy, R-5, 0, Math.PI*2); ctx.stroke();
+    ctx.strokeStyle = "rgba(0,0,0,0.45)";
+    ctx.beginPath(); ctx.arc(cx, cy, R-13, 0, Math.PI*2); ctx.stroke();
+
+    // highlight chamber at marker
     const slice = (Math.PI*2)/n;
-    for(let i=0;i<n;i++){
-      const a0 = startAngle + i*slice;
-      const a1 = a0 + slice;
-      // alternating subtle colors without hardcoding exact hues
-      ctx.fillStyle = i%2 ? "#1b2440" : "#233055";
-      ctx.beginPath();
-      ctx.moveTo(cx,cy);
-      ctx.arc(cx,cy,r,a0,a1);
-      ctx.closePath();
-      ctx.fill();
-
-      // labels
-      ctx.save();
-      ctx.translate(cx,cy);
-      ctx.rotate((a0+a1)/2);
-      ctx.textAlign = "right";
-      ctx.fillStyle = "#e7edf5";
-      ctx.font = "16px system-ui";
-      ctx.fillText(names[i], r-10, 4);
-      ctx.restore();
-    }
-
-    // center button circle
-    ctx.beginPath();
-    ctx.arc(cx,cy,60,0,Math.PI*2);
-    ctx.fillStyle="#0e1524";
-    ctx.fill();
-    ctx.lineWidth=2; ctx.strokeStyle="#253252"; ctx.stroke();
-
-    ctx.fillStyle="#e7edf5"; ctx.textAlign="center"; ctx.textBaseline="middle";
-    ctx.font="bold 16px system-ui";
-    ctx.fillText("SPIN", cx, cy);
-  }
-
-  // Spin logic
-  let spinning = false;
-  function fairRandomAngle(){
-    // random target slice + random offset within slice so all names are equally likely
-    const n = names.length;
-    const slice = (Math.PI*2)/n;
-    const targetIndex = Math.floor(Math.random()*n);
-    const offset = (Math.random()-0.5)*slice*0.9; // stay within slice
-    const targetAngle = startAngle + targetIndex*slice + slice/2 + offset;
-    // we want that angle to end up at the marker (top). Current rotation maps slice positions,
-    // so compute final rotation that puts targetAngle at -PI/2 (top/marker).
-    const final = -Math.PI/2 - (targetAngle - startAngle);
-    // add multiple full spins for drama
-    const extra = Math.PI*2*(4 + Math.floor(Math.random()*2)); // 4-5 spins
-    return startAngle + final + extra;
-  }
-
-  function spin(){
-    if(spinning || names.length===0) return;
-    spinning = true;
-    status.textContent = "Spinning…";
-
-    const begin = performance.now();
-    const from = startAngle;
-    const to = fairRandomAngle();
-    const duration = 3800 + Math.random()*800;
-
-    (function anim(t0){
-      const t = (t0 - begin) / duration;
-      const e = t<0 ? 0 : t>1 ? 1 : t;
-      // easeOutCubic
-      const k = 1 - Math.pow(1-e, 3);
-      startAngle = from + (to - from)*k;
-      draw();
-      if(e < 1){
-        requestAnimationFrame(anim);
-      } else {
-        spinning = false;
-        const hit = currentNameAtMarker();
-        status.innerHTML = `☠️ <b>${hit}</b> — take a shot!`;
-        if(soundToggle.checked){
-          bang.currentTime = 0;
-          bang.play().catch(()=>{/* autoplay block ignored */});
-        }
-        if(removeOnHit.checked){
-          names = names.filter(n => n !== hit);
-          namesInput.value = names.join(", ");
-          localStorage.setItem(LS_KEY, JSON.stringify(names));
-          setTimeout(()=>draw(), 400);
-        }
-      }
-    })(performance.now());
-  }
-
-  function currentNameAtMarker(){
-    const n = names.length;
-    const slice = (Math.PI*2)/n;
-    // Angle at marker is -PI/2 in canvas space; map back to index
-    const relative = ((-Math.PI/2) - startAngle) % (Math.PI*2);
-    const norm = (relative + Math.PI*2) % (Math.PI*2);
-    const idx = Math.floor(norm / slice);
-    return names[idx];
-  }
-
-  // wires
-  $("#spin").addEventListener("click", spin);
-  $("#saveNames").addEventListener("click", saveNames);
-  $("#shuffle").addEventListener("click", ()=>{
-    names = shuffle(names);
-    namesInput.value = names.join(", ");
-    localStorage.setItem(LS_KEY, JSON.stringify(names));
-    draw();
-  });
-  $("#nuke").addEventListener("click", ()=> status.textContent="Ready.");
-
-  // init
-  loadNames();
-  draw();
-})();
-</script>
-</body>
-</html>
+    const chamberR = R*0.18*
